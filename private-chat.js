@@ -1,6 +1,5 @@
 let socket;
 let currentUsername;
-let currentRoomId;
 
 // Initialize WebSocket connection
 function setupWebSocket() {
@@ -8,10 +7,10 @@ function setupWebSocket() {
 
     socket.onopen = () => {
         console.log('WebSocket connection established');
+        
         // Request list of active users
         socket.send(JSON.stringify({ 
-            type: 'getActiveUsers', 
-            roomId: currentRoomId 
+            type: 'getActiveUsers' 
         }));
     };
 
@@ -20,11 +19,6 @@ function setupWebSocket() {
 
         if (message.type === 'activeUsersList') {
             displayActiveUsers(message.users);
-        }
-
-        if (message.type === 'privateMessage') {
-            // Handle incoming private message
-            displayPrivateMessage(message);
         }
     };
 }
@@ -46,18 +40,17 @@ function displayActiveUsers(users) {
 
 // Start private chat with selected user
 function startPrivateChat(targetUser) {
-    // Navigate to private chat page
-    window.location.href = `private-chat.html?target=${encodeURIComponent(targetUser)}`;
+    // Navigate to private chat page with target user
+    window.location.href = `private-chat-interface.html?target=${encodeURIComponent(targetUser)}`;
 }
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
-    // Retrieve username and room from local storage
+    // Retrieve username from local storage
     currentUsername = localStorage.getItem('username');
-    currentRoomId = localStorage.getItem('roomId');
 
-    if (!currentUsername || !currentRoomId) {
-        // Redirect to main page if no username/room
+    if (!currentUsername) {
+        // Redirect to main page if no username
         window.location.href = 'index.html';
         return;
     }
@@ -68,6 +61,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Back to chat button
     const backButton = document.getElementById('back-to-chat');
     backButton.addEventListener('click', () => {
-        window.location.href = 'chat.html';
+        window.location.href = 'index.html';
     });
 });
