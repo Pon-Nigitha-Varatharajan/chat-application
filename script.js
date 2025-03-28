@@ -36,6 +36,59 @@ createRoomButton.addEventListener('click', () => {
     chatInterface.classList.add('hidden');
 });
 
+// Set up WebSocket connection
+function setupWebSocket() {
+    if (isWebSocketSetup) return; // Ensure WebSocket is set up only once
+    isWebSocketSetup = true;
+
+    socket = new WebSocket('ws://localhost:3000');
+
+    socket.onopen = () => {
+        console.log('WebSocket connection established');
+        // Register user globally
+        socket.send(JSON.stringify({
+            type: 'registerUser',
+            username: currentUsername
+        }));
+    };
+
+    socket.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+
+        // Handle user registration error
+        if (message.type === 'userRegistrationError') {
+            alert(message.message);
+            isWebSocketSetup = false;
+            return;
+        }
+
+        // Room list handling
+        if (message.type === 'roomList') {
+            displayRooms(message.rooms);
+        }
+
+        // Room creation
+        if (message.type === 'roomCreated') {
+            alert(`Room created: ${message.roomId}`);
+        }
+
+        // User joined room
+        if (message.type === 'userJoined') {
+            appendMessage(`${message.username} joined the room. Clients: ${message.clients}`);
+        }
+
+        // Incoming messages
+        if (message.type === 'message') {
+            appendMessage(`${message.username}: ${message.text}`);
+        }
+    };
+
+    socket.onclose = () => {
+        console.log('WebSocket connection closed');
+        isWebSocketSetup = false;
+    };
+}
+
 // Handle client username submission
 submitUsernameButton.addEventListener('click', () => {
     const username = usernameInput.value.trim();
@@ -57,48 +110,6 @@ submitRoomButton.addEventListener('click', () => {
         roomNameInput.value = ''; // Clear input field
     }
 });
-
-// Private message button
-privateMessageButton.addEventListener('click', () => {
-    // Navigate to private users page
-    window.location.href = 'private-users.html';
-});
-
-// Set up WebSocket connection
-function setupWebSocket() {
-    if (isWebSocketSetup) return; // Ensure WebSocket is set up only once
-    isWebSocketSetup = true;
-
-    socket = new WebSocket('ws://localhost:3000');
-
-    socket.onopen = () => {
-        console.log('WebSocket connection established');
-    };
-
-    socket.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-
-        if (message.type === 'roomList') {
-            displayRooms(message.rooms);
-        }
-
-        if (message.type === 'roomCreated') {
-            alert(`Room created: ${message.roomId}`);
-        }
-
-        if (message.type === 'userJoined') {
-            appendMessage(`${message.username} joined the room. Clients: ${message.clients}`);
-        }
-
-        if (message.type === 'message') {
-            appendMessage(`${message.username}: ${message.text}`);
-        }
-    };
-
-    socket.onclose = () => {
-        console.log('WebSocket connection closed');
-    };
-}
 
 // Display available rooms
 function displayRooms(rooms) {
@@ -138,7 +149,18 @@ function appendMessage(message) {
 sendMessageButton.addEventListener('click', () => {
     const message = chatInput.value.trim();
     if (message) {
-        socket.send(JSON.stringify({ type: 'message', roomId: currentRoomId, username: currentUsername, text: message }));
+        socket.send(JSON.stringify({ 
+            type: 'message', 
+            roomId: currentRoomId, 
+            username: currentUsername, 
+            text: message 
+        }));
         chatInput.value = '';
     }
+});
+
+// Private message button
+privateMessageButton.addEventListener('click', () => {
+    // Navigate to private users page
+    window.location.href = 'private-users.html';
 });
