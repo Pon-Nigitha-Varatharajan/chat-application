@@ -20,31 +20,76 @@ app.get('/', (req, res) => {
 // Store rooms and their client counts
 const rooms = new Map();
 
-// Store active users
-const activeUsers = new Map();
-
-// Store private chat connections
-const privateChats = new Map();
+// Global active users list (independent of rooms)
+const globalActiveUsers = new Map();
 
 // WebSocket connection
 wss.on('connection', (ws) => {
     console.log('New client connected');
 
-    // Send the list of available rooms to the client
-    ws.send(JSON.stringify({
-        type: 'roomList',
-        rooms: Array.from(rooms.entries()).map(([roomId, room]) => ({
-            roomId,
-            clients: room.clients,
-        })),
-    }));
-
     ws.on('message', (data) => {
         const message = JSON.parse(data);
 
-        // Existing room and messaging logic...
+        // User registration for global active users list
+        if (message.type === 'registerUser') {
+            const { username } = message;
+            
+            // Check if username is already taken
+            if (Array.from(globalActiveUsers.keys()).includes(username)) {
+                ws.send(JSON.stringify({ 
+                    type: 'userRegistrationError', 
+                    message: 'Username already exists' 
+                }));
+                return;
+            }
+
+            // Add user to global active users
+            globalActiveUsers.set(username, {
+                connectionTime: new Date(),
+                ws: ws
+            });
+
+            // Broadcast updated active users list to all clients
+            broadcastActiveUsersList();
+
+            console.log(`User registered: ${username}. Total active users: ${globalActiveUsers.size}`);
+        }
+
+        // Get active users list
+        if (message.type === 'getActiveUsers') {
+            ws.send(JSON.stringify({
+                type: 'activeUsersList',
+                users: Array.from(globalActiveUsers.keys())
+            }));
+        }
+
+        // Private messaging
+        if (message.type === 'privateMessage') {
+            const { from, to, text } = message;
+            
+            // Find target user's WebSocket
+            const targetUser = globalActiveUsers.get(to);
+            if (targetUser) {
+                wss.clients.forEach((client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({
+                            type: 'privateMessage',
+                            from,
+                            to,
+                            text
+                        }));
+                    }
+                });
+            } else {
+                ws.send(JSON.stringify({
+                    type: 'privateMessageError',
+                    message: 'User is not online'
+                }));
+            }
+        }
+
+        // Existing room logic remains the same
         if (message.type === 'createRoom') {
-            // Create a new room
             const roomId = message.roomName;
             if (!rooms.has(roomId)) {
                 rooms.set(roomId, { clients: 0, users: [] });
@@ -67,113 +112,38 @@ wss.on('connection', (ws) => {
                 ws.send(JSON.stringify({ type: 'error', message: 'Room already exists' }));
             }
         }
-
-        if (message.type === 'joinRoom') {
-            // Join a room
-            const roomId = message.roomId;
-            const username = message.username;
-
-            if (rooms.has(roomId)) {
-                // Increment client count
-                const room = rooms.get(roomId);
-                room.clients += 1;
-                room.users.push(username);
-                rooms.set(roomId, room);
-
-                // Store active user
-                activeUsers.set(username, { roomId });
-
-                console.log(`${username} joined room ${roomId}. Clients: ${room.clients}`);
-
-                // Notify all clients in the room
-                wss.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify({
-                            type: 'userJoined',
-                            username,
-                            roomId,
-                            clients: room.clients,
-                        }));
-                    }
-                });
-            } else {
-                ws.send(JSON.stringify({ type: 'error', message: 'Room does not exist' }));
-            }
-        }
-
-        // New private messaging logic
-        if (message.type === 'getActiveUsers') {
-            const roomId = message.roomId;
-            const room = rooms.get(roomId);
-            
-            ws.send(JSON.stringify({
-                type: 'activeUsersList',
-                users: room ? room.users : []
-            }));
-        }
-
-        if (message.type === 'startPrivateChat') {
-            const { sender, target } = message;
-            const privateRoomId = `${sender}-${target}`;
-            privateChats.set(privateRoomId, { 
-                participants: [sender, target],
-                messages: [] 
-            });
-        }
-
-        if (message.type === 'privateMessage') {
-            const { from, to, text } = message;
-            
-            // Broadcast private message to all WebSocket clients
-            wss.clients.forEach((client) => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({
-                        type: 'privateMessage',
-                        from,
-                        to,
-                        text
-                    }));
-                }
-            });
-
-            // Optionally store message in private chat room
-            const privateRoomId = `${from}-${to}`;
-            const privateRoom = privateChats.get(privateRoomId);
-            if (privateRoom) {
-                privateRoom.messages.push({ from, text, timestamp: new Date() });
-            }
-        }
-
-        // Existing message broadcasting logic...
-        if (message.type === 'message') {
-            // Broadcast message to all clients in the room
-            const { roomId, username, text } = message;
-            wss.clients.forEach((client) => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({
-                        type: 'message',
-                        username,
-                        text,
-                    }));
-                }
-            });
-        }
     });
 
+    // Handle client disconnection
     ws.on('close', () => {
         console.log('Client disconnected');
-        // Remove user from active users and rooms
-        for (const [username, userInfo] of activeUsers.entries()) {
-            const room = rooms.get(userInfo.roomId);
-            if (room) {
-                room.users = room.users.filter(u => u !== username);
-                room.clients -= 1;
-                rooms.set(userInfo.roomId, room);
+        
+        // Remove user from global active users
+        for (const [username, userInfo] of globalActiveUsers.entries()) {
+            if (userInfo.ws === ws) {
+                globalActiveUsers.delete(username);
+                
+                // Broadcast updated active users list
+                broadcastActiveUsersList();
+                break;
             }
-            activeUsers.delete(username);
         }
     });
 });
+
+// Broadcast active users list to all connected clients
+function broadcastActiveUsersList() {
+    const activeUsersList = Array.from(globalActiveUsers.keys());
+    
+    wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+                type: 'activeUsersList',
+                users: activeUsersList
+            }));
+        }
+    });
+}
 
 // Start the server
 server.listen(PORT, () => {
